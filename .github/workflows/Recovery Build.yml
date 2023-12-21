@@ -1,0 +1,99 @@
+name: Recovery Build
+
+on:
+  workflow_dispatch:
+    inputs:
+      RECOVERY_NAME:
+        description: 'RECOVERY_NAME (Only support TWRP_12,OrangeFox_12.)'
+        required: true
+      DEVICE_PATH:
+        description: 'DEVICE_PATH'
+        required: true
+      DEVICE_TREE_URL_BRANCH:
+        description: 'DEVICE_TREE_URL&BRANCH'
+        required: true
+      COMMON_TREE_URL_BRANCH:
+        description: 'COMMON_TREE_URL&BRANCH (if no common tree, leave blank)'
+        required: false
+      COMMON_PATH:
+        description: 'COMMON_PATH (if no common tree, leave blank)'
+        required: false
+      MAKEFILE_NAME_BUILD_TYPE:
+        description: 'MAKEFILE_NAME&BUILD_TYPE'
+        required: true
+      BUILD_TARGET:
+        description: 'BUILD_TARGET'
+        required: true
+
+jobs:
+  Build:
+    runs-on: self-hosted
+    steps:
+    - name: Display run parameters
+      run: |
+        echo "::group::User Environment Variables"
+        echo "RECOVERY_NAME: ${{ github.event.inputs.RECOVERY_NAME }}"
+        echo "DEVICE_PATH: ${{ github.event.inputs.DEVICE_PATH }}"
+        echo "DEVICE_TREE_URL_BRANCH: ${{ github.event.inputs.DEVICE_TREE_URL_BRANCH }}"
+        echo "COMMON_TREE_URL_BRANCH: ${{ github.event.inputs.COMMON_TREE_URL_BRANCH }}"
+        echo "COMMON_PATH: ${{ github.event.inputs.COMMON_PATH }}"
+        echo "MAKEFILE_NAME_BUILD_TYPE: ${{ github.event.inputs.MAKEFILE_NAME_BUILD_TYPE }}"
+        echo "BUILD_TARGET: ${{ github.event.inputs.BUILD_TARGET }}"
+        echo "::endgroup::"
+
+    - name: Clone device tree
+      run: |
+        rm -rf ./device/${{ github.event.inputs.DEVICE_PATH }}
+        git clone ${{ github.event.inputs.DEVICE_TREE_URL_BRANCH }} --depth=1 ./device/${{ github.event.inputs.DEVICE_PATH }}
+      working-directory: ./Recovery/${{ github.event.inputs.RECOVERY_NAME }}
+
+    - name: Clone common tree
+      if: |
+        github.event.inputs.COMMON_TREE_URL_BRANCH != null 
+      run: |
+        rm -rf ./device/${{ github.event.inputs.COMMON_PATH }}
+        git clone ${{ github.event.inputs.COMMON_TREE_URL_BRANCH }} --depth=1 ./device/${{ github.event.inputs.COMMON_PATH }}
+      working-directory: ./Recovery/${{ github.event.inputs.RECOVERY_NAME }}
+
+    - name: Building Recovery
+      id: out-puts
+      run: |
+        . build/envsetup.sh
+        lunch ${{ github.event.inputs.MAKEFILE_NAME_BUILD_TYPE }}
+        echo "OUT=$OUT" >> "$GITHUB_OUTPUT"
+        mka ${{ github.event.inputs.BUILD_TARGET }}image
+      working-directory: ./Recovery/${{ github.event.inputs.RECOVERY_NAME }}
+
+    - name: Upload error.log
+      uses: actions/upload-artifact@v3
+      if: ${{ failure() }}
+      with:
+        name: errorlog
+        path: /home/localhost/Recovery/${{ github.event.inputs.RECOVERY_NAME }}/out/error.log
+
+    - name: Upload to release
+      uses: softprops/action-gh-release@v1
+      with:
+        files: ${{ steps.out-puts.outputs.OUT }}/${{ github.event.inputs.BUILD_TARGET }}.img
+        name: ${{ github.event.inputs.MAKEFILE_NAME_BUILD_TYPE }}-${{ github.run_id }}
+        tag_name: ${{ github.event.inputs.MAKEFILE_NAME_BUILD_TYPE }}
+        body: |
+          Recovery Name: ${{ github.event.inputs.RECOVERY_NAME }}
+          Device Name & Build Type: ${{ github.event.inputs.MAKEFILE_NAME_BUILD_TYPE }}
+          Target: ${{ github.event.inputs.BUILD_TARGET }}.img
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+    - name: Delete device tree
+      if: |
+        always()
+      run: |
+        rm -rf ./device/${{ github.event.inputs.DEVICE_PATH }}
+      working-directory: ./Recovery/${{ github.event.inputs.RECOVERY_NAME }}
+
+    - name: Delete common device tree
+      if: |
+        always() && github.event.inputs.COMMON_PATH != null
+      run: |
+        rm -rf ./device/${{ github.event.inputs.COMMON_PATH }}
+        working-directory: ./Recovery/${{ github.event.inputs.RECOVERY_NAME }}
