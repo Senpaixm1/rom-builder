@@ -36,7 +36,9 @@ on:
 
 jobs:
   Build:
-    runs-on: self-hosted
+    docker:
+      - image: cimg/base:current
+    resource_class: ltuxmp1vb4b7nmptusbsep/3
     steps:
     - name: Display run parameters
       run: |
